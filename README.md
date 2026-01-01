@@ -35,6 +35,8 @@ OS Support: Windows / Linux
 
 # Installation
 git clone https://github.com/your-username/signature-recognition-system.git
+
 cd signature-recognition-system
+
 pip install -r requirements.txt
 
