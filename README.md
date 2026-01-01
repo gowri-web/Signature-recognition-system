@@ -52,3 +52,16 @@ Uploaded signature is compared with stored references
 
 Result is returned as Match / No Match
 
+# Screenshots
+
+<img width="1280" height="714" alt="image" src="https://github.com/user-attachments/assets/e36df649-378d-4a8d-965f-be0a0e559a00" />
+<img width="1280" height="721" alt="image" src="https://github.com/user-attachments/assets/7771fd3e-ee04-40ac-a60f-98f61ba79eaf" />
+<img width="1280" height="717" alt="image" src="https://github.com/user-attachments/assets/b761273e-ea59-4df2-bd2b-b6b2ec594e77" />
+<img width="1280" height="721" alt="image" src="https://github.com/user-attachments/assets/01d47b91-d2ab-4803-ae0a-538c19f608b1" />
+<img width="1280" height="721" alt="image" src="https://github.com/user-attachments/assets/a93adb53-5ef9-4ccb-8312-fe039bfe5404" />
+
+
+
+
+
+
