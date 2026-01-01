@@ -9,4 +9,22 @@ This project demonstrates the practical application of computer vision, pattern 
 # ER Diagram
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/b7166700-7884-436f-a71c-4761273a5f89" />
 
+# Technology Stack
 
+Language: Python
+
+Libraries:
+
+OpenCV – Image processing
+
+NumPy – Numerical operations
+
+scikit-learn / TensorFlow / PyTorch – Model training
+
+Model Types:
+
+SVM / Random Forest (traditional ML)
+
+CNN (deep learning – optional)
+
+OS Support: Windows / Linux
