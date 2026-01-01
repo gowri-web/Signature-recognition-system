@@ -17,10 +17,6 @@ Backend: Python
 
 Database: SQLite
 
-Frontend: HTML,CSS,JavaScript
-
-Database: SQLite
-
 Libraries:
 
 OpenCV – Image processing
