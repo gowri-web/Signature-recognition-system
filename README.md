@@ -40,3 +40,15 @@ cd signature-recognition-system
 
 pip install -r requirements.txt
 
+# Working
+
+User uploads a signature image
+
+Signature is stored in the system
+
+Metadata is saved in SQLite
+
+Uploaded signature is compared with stored references
+
+Result is returned as Match / No Match
+
