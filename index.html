@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Signature Recognition System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles to match the mockup's color scheme */
+        :root {
+            --bg-main: #D0C276; /* Yellow/Tan to match screenshot */
+            --bg-sidebar: #E6E1C0; /* Lighter Yellow/Tan to match screenshot */
+            --btn-primary: #3b82f6;
+            --btn-hover: #2563eb;
+        }
+
+        .main-content {
+            background-color: var(--bg-main);
+        }
+        .sidebar {
+            background-color: var(--bg-sidebar);
+        }
+        .app-container {
+            min-height: 100vh;
+        }
+    </style>
+</head>
+<body class="font-sans antialiased">
+
+    <div id="app" class="app-container flex p-4 bg-gray-100">
+        <div id="loading-screen" class="flex items-center justify-center min-h-screen w-full">
+            <p class="text-gray-700">Initializing application...</p>
+        </div>
+    </div>
+
+    <script type="module">
+        // --- API & BACKEND CONFIGURATION ---
+  
+        // CRITICAL: Ensure this matches the server address where your Python app.py is running!
+        const API_BASE_URL = 'http://127.0.0.1:8080/api'; 
+        // -----------------------------------
+
+        // --- GLOBAL STATE ---
+        const state = {
+            userId: null,
+            isAuthReady: false,
+            isLoggedIn: false,
+            inputImageFile: null,
+            referenceImageFile: null,
+            referenceImageB64: null, // Holds the reference image loaded from the MySQL backend
+            recognitionLoading: false,
+            recognitionError: '',
+            isDebuggingMode: false,
+            inputImageB64String: null, // Holds the Base64 string for debug display
+            referenceImageB64String: null, // NEW: Holds the reference Base64 string for debug display
+            results: {
+                recognitionResult: '',
+                entropy: '',
+                mean: '',
+                grayConversionB64: null,
+                filteredImageB64: null,
+                roiInputB64: null,
+                roiRefB64: null,
+            },
+            message: {
+                text: '',
+                type: '' // 'success', 'error', 'info'
+            }
+        };
+        // --- UTILITY FUNCTIONS ---
+
+        /**
+         * Converts a File object to a Base64 string for API transmission.
+         * @param {File} file 
+         * @returns {Promise<string|null>} Full Base64 data URL (e.g., data:image/jpeg;base64,...)
+         */
+        const fileToBase64 = (file) => {
+            return new Promise((resolve) => {
+                if (!file) {
+                    resolve(null);
+                    return;
+                }
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = () => resolve(reader.result); 
+                reader.onerror = (error) => {
+                    console.error("File to Base64 conversion failed:", error);
+                    resolve(null);
+                };
+            });
+        };
+
+        /**
+         * Shows a temporary message banner.
+         * @param {string} text Message content.
+         * @param {string} type 'success', 'error', or 'info'.
+         */
+        const showMessage = (text, type) => {
+            state.message.text = text;
+            state.message.type = type;
+            updateMessageDisplay();
+            setTimeout(() => {
+                state.message.text = '';
+                updateMessageDisplay();
+            }, 4000);
+        };
+        
+        // --- BACKEND API FUNCTIONS (Database Access) ---
+
+        /**
+         * Fetches the user's reference signature from the Backend API (which connects to SQLite).
+         */
+        const fetchReferenceSignature = async (userId) => {
+            if (!userId) return;
+            try {
+                // GET request to fetch the reference signature using the user ID
+                const response = await fetch(`${API_BASE_URL}/get-reference?userId=${userId}`);
+                if (!response.ok) {
+                     // 404 is expected if the user has no signature yet
+                    if (response.status !== 404) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    // Handle 404 or non-success response from the API (e.g., {"success": false})
+                    const errorData = await response.json().catch(() => ({}));
+                    if (!errorData.success) {
+                        state.referenceImageB64 = null;
+                        state.referenceImageB64String = null; // NEW: Clear debug string
+                        updateImageDisplay('reference-image-box', null, 'No Reference Signature Found. Upload and Save one!');
+                        showMessage("No reference signature found. Please upload and save one.", 'info');
+                    }
+                    return;
+                    // Stop execution after handling the missing signature case
+                }
+
+                const data = await response.json();
+                if (data.success && data.signatureB64) {
+                    state.referenceImageB64 = data.signatureB64;
+                    state.referenceImageB64String = data.signatureB64; // NEW: Set debug string
+                    // Also update the UI box for the reference image
+                    updateImageDisplay('reference-image-box', state.referenceImageB64, 'Reference loaded from SQLite');
+                    showMessage("Reference signature loaded from database.", 'success');
+                } else {
+                    state.referenceImageB64 = null;
+                    state.referenceImageB64String = null; // NEW: Clear debug string
+                    updateImageDisplay('reference-image-box', null, 'No Reference Signature Found. Upload and Save one!');
+                    showMessage("No reference signature found. Please upload and save one.", 'info');
+                }
+            } catch (error) {
+                console.error("Error fetching reference signature:", error);
+                showMessage(`Error loading reference signature. Check backend URL: ${API_BASE_URL}`, 'error');
+            }
+            updateResultsDisplay(); // Update debug panel
+        };
+        /**
+         * Saves the current selected reference image to the Backend API (which connects to SQLite).
+         */
+        const saveReferenceSignature = async () => {
+            if (!state.userId) {
+                showMessage("Authentication error. Cannot save. Please log in first.", 'error');
+                return;
+            }
+            if (!state.referenceImageFile) {
+                showMessage("Please select a Reference Image first.", 'error');
+                return;
+            }
+
+            try {
+                showMessage("Saving reference signature via API...", 'info');
+                const refB64 = await fileToBase64(state.referenceImageFile);
+                
+                // POST request to save the reference signature
+                const response = await fetch(`${API_BASE_URL}/save-reference`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId: state.userId,
+                        signatureB64: refB64
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                if (result.success) {
+                    state.referenceImageB64 = refB64;
+                    state.referenceImageB64String = refB64; // NEW: Set debug string
+                    // Update state after successful save
+                    showMessage("Reference signature saved successfully!", 'success');
+                } else {
+                    showMessage(result.message || "Failed to save reference signature.", 'error');
+                }
+                
+            } catch (error) {
+                console.error("Error saving reference signature:", error);
+                showMessage(`Failed to save reference signature. Check backend connection: ${error.message}`, 'error');
+            }
+             updateResultsDisplay(); // Update debug panel
+        };
+        // --- SIGNATURE RECOGNITION API (LIVE CALL) FUNCTION ---
+
+        /**
+         * Sends images to the real backend API for processing and recognition.
+         * @param {string} inputB64 The full data URL of the input image.
+         * @param {string} refB64 The full data URL of the reference image (from DB or file).
+         */
+        const callRecognitionAPI = async (inputB64, refB64, userId) => {
+            console.log(`[Recognition API] Sending request to backend at: ${API_BASE_URL}/recognize`);
+            // --- CRITICAL: This is the real API call ---
+            const response = await fetch(`${API_BASE_URL}/recognize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userId: userId,
+                    input_image_b64: inputB64,
+                    reference_image_b64: refB64,
+                })
+            });
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Server returned status ${response.status}: ${errorText}`);
+            }
+
+            const apiResults = await response.json();
+            // Simple validation to ensure the response 
+            if (!apiResults.recognitionResult || !apiResults.entropy || !apiResults.roiInputB64) {
+                 throw new Error("Invalid response structure received from backend.");
+            }
+            
+            return apiResults;
+        };
+
+
+        // --- RENDERING & UI FUNCTIONS ---
+        
+        /**
+         * Updates the temporary message banner.
+         */
+        const updateMessageDisplay = () => {
+            const container = document.getElementById('message-alert');
+            if (!container) return;
+
+            const { text, type } = state.message;
+            if (text) {
+                container.textContent = text;
+                container.classList.remove('hidden', 'bg-red-500', 'bg-green-500', 'bg-blue-500');
+                
+                let bgColor = 'bg-blue-500';
+                if (type === 'error') bgColor = 'bg-red-500';
+                if (type === 'success') bgColor = 'bg-green-500';
+                
+                container.classList.add(bgColor);
+            } else {
+                container.classList.add('hidden');
+            }
+        };
+
+        /**
+         * Updates a specific image box in the UI.
+         */
+        const updateImageDisplay = (id, url, fallbackText) => {
+            const container = document.getElementById(id);
+            if (!container) return;
+            
+            // Clear existing content
+            container.innerHTML = '';
+            const imgElement = container.querySelector('img') || document.createElement('img');
+            imgElement.className = 'object-contain max-h-full max-w-full rounded-md';
+            imgElement.alt = fallbackText;
+            
+            const fallbackDiv = container.querySelector('.fallback-text') ||
+            document.createElement('div');
+            fallbackDiv.className = 'fallback-text text-gray-500 text-center p-4 text-sm';
+            fallbackDiv.textContent = fallbackText;
+            if (url) {
+                // Check if URL is a small placeholder (using a heuristic) to apply full background style
+                if (url.length < 200) { 
+                    imgElement.className = 'w-full h-full object-cover rounded-md';
+                } else {
+                    imgElement.className = 'object-contain max-h-full max-w-full rounded-md';
+                }
+
+                imgElement.src = url;
+                container.appendChild(imgElement);
+            } else {
+                container.appendChild(fallbackDiv);
+            }
+        };
+
+        /**
+         * Renders or updates the main recognition result and parameters.
+         */
+        const updateResultsDisplay = () => {
+            const resultDiv = document.getElementById('recognition-result-display');
+            const entropyInput = document.getElementById('entropy-input');
+            const meanInput = document.getElementById('mean-input');
+            const inputDebugDisplay = document.getElementById('debug-input-base64'); // NEW
+            const refDebugDisplay = document.getElementById('debug-reference-base64'); // NEW
+
+            // 1. Update Result Box Style and Text
+            const result = state.results.recognitionResult;
+            resultDiv.textContent = result || (state.recognitionLoading ? 'Analyzing...' : 'Click Recognition');
+            resultDiv.className = `flex-grow flex items-center justify-center p-3 border-4 rounded-lg bg-white shadow-md text-center font-extrabold text-lg transition-colors duration-300`;
+            
+            let colorClass = 'text-gray-500';
+            let borderColor = '#6B7280';
+
+            if (state.recognitionLoading) {
+                 colorClass = 'text-blue-500';
+            } else if (result.includes('ACCEPTED')) {
+                colorClass = 'text-green-600';
+                borderColor = '#34D399';
+            } else if (result.includes('REJECTED') || result.includes('ERROR')) {
+                colorClass = 'text-red-600';
+                borderColor = '#F87171';
+            }
+
+            resultDiv.classList.add(colorClass);
+            resultDiv.style.borderColor = borderColor;
+            // 2. Update Parameters
+            entropyInput.value = state.results.entropy || 'N/A';
+            meanInput.value = state.results.mean || 'N/A';
+
+            // 3. Update Processed Image Displays
+            updateImageDisplay('gray-conversion-display', state.results.grayConversionB64, 'Grayscale output from Backend');
+            updateImageDisplay('filtered-image-display', state.results.filteredImageB64, 'Filtered output from Backend');
+            updateImageDisplay('roi-input-display', state.results.roiInputB64, 'Input ROI');
+            updateImageDisplay('roi-reference-display', state.results.roiRefB64, 'Reference ROI');
+            // 4. Ensure input image is displayed if a file is selected
+            if (state.inputImageFile) {
+                updateImageDisplay('input-image-box', URL.createObjectURL(state.inputImageFile), state.inputImageFile.name);
+            } else {
+                updateImageDisplay('input-image-box', null, 'Input Sign Image');
+            }
+
+            // 5. Ensure reference image is displayed if a file or DB image is present
+            const refSource = state.referenceImageFile ?
+            URL.createObjectURL(state.referenceImageFile) : state.referenceImageB64;
+            const refText = state.referenceImageFile ? state.referenceImageFile.name : (state.referenceImageB64 ? 'Reference from DB' : 'Reference Image');
+            updateImageDisplay('reference-image-box', refSource, refText);
+
+            // 6. NEW: Update Debug Display
+            const debugContainer = document.getElementById('debug-panel-container');
+            if (debugContainer) {
+                const updateDebugField = (displayElement, b64String, label) => {
+                    if (displayElement) {
+                        if (state.isDebuggingMode && b64String) {
+                            displayElement.value = b64String.substring(0, 50) + '... (' + (b64String.length / 1024).toFixed(1) + ' KB)';
+                            displayElement.title = b64String;
+                            displayElement.placeholder = `${label} Base64 string is ready.`;
+                        } else {
+                            displayElement.value = '';
+                            displayElement.title = '';
+                            displayElement.placeholder = `${label} Base64 string will appear here in Debug Mode.`;
+                        }
+                    }
+                };
+
+                updateDebugField(inputDebugDisplay, state.inputImageB64String, 'Input');
+                updateDebugField(refDebugDisplay, state.referenceImageB64String, 'Reference');
+
+                debugContainer.classList.toggle('hidden', !state.isDebuggingMode);
+            }
+            
+            // 7. Update Debug Button Text
+            const debugButton = document.getElementById('btn-toggle-debug');
+            if (debugButton) {
+                debugButton.textContent = state.isDebuggingMode ? 'DEBUG Mode: ON' : 'DEBUG Mode: OFF';
+                debugButton.classList.toggle('bg-gray-600', state.isDebuggingMode);
+                debugButton.classList.toggle('hover:bg-gray-700', state.isDebuggingMode);
+                debugButton.classList.toggle('bg-gray-400', !state.isDebuggingMode);
+                debugButton.classList.toggle('hover:bg-gray-500', !state.isDebuggingMode);
+            }
+        };
+
+        /**
+         * Renders the full main application UI.
+         */
+        const renderMainApp = () => {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <input type="file" id="input-file-upload" accept="image/*" class="hidden">
+                <input type="file" id="reference-file-upload" accept="image/*" class="hidden">
+
+                <div class="sidebar 
+w-1/4 max-w-xs p-4 rounded-xl shadow-lg flex flex-col justify-between h-full min-h-[90vh] mr-4">
+                    <div>
+                        <div class="text-lg font-bold mb-4 text-gray-800">Menu</div>
+                        <button id="btn-input-sign" class="w-full py-3 px-4 mb-3 rounded-lg text-sm font-medium transition duration-200 shadow-md bg-blue-500 hover:bg-blue-600 text-white">
+                            Input Sign Image
+                        </button>
+                        <button id="btn-select-reference" class="w-full py-3 px-4 mb-1 rounded-lg text-sm font-medium transition duration-200 shadow-md bg-indigo-500 hover:bg-indigo-600 text-white">
+                            Select Reference Image
+                        </button>
+                        <button id="btn-save-reference" class="w-full py-3 px-4 mb-3 rounded-lg text-sm font-medium transition duration-200 shadow-md bg-green-500 hover:bg-green-600 text-white">
+                            SAVE Reference via API
+                        </button>
+                        <button id="btn-recognition" class="w-full py-3 px-4 mb-3 rounded-lg text-sm font-medium transition duration-200 shadow-md bg-blue-500 hover:bg-blue-600 text-white">
+                            Recognition
+                        </button>
+                        <button id="btn-clear-all" class="w-full py-3 px-4 mb-3 rounded-lg text-sm font-medium transition duration-200 shadow-md bg-orange-500 hover:bg-orange-600 text-white">
+                            Clear All
+                        </button>
+                        <button id="btn-exit" class="w-full py-3 px-4 mb-3 rounded-lg text-sm font-medium transition duration-200 shadow-md bg-red-500 hover:bg-red-600 text-white">
+                            Exit
+                        </button>
+                        <button id="btn-toggle-debug" class="w-full py-2 px-4 mt-4 rounded-lg text-xs font-medium transition duration-200 shadow-sm bg-gray-400 hover:bg-gray-500 text-white">
+                            DEBUG Mode: OFF
+                        </button>
+                    </div>
+                    
+                    <div class="text-xs text-gray-700 border-t pt-3 
+mt-4">
+                        <p class="text-gray-500 break-all">User ID: <span class="font-mono text-gray-800 break-all">${state.userId ||
+'N/A'}</span></p>
+                        <p class="text-gray-500 break-all mt-1 text-xs">Backend URL: <span class="font-mono text-gray-800 break-all">${API_BASE_URL}</span></p>
+                    </div>
+                </div>
+
+                <div class="flex-grow main-content p-4 rounded-xl shadow-lg flex flex-col space-y-4">
+                    
+                    <div id="message-alert" class="hidden absolute top-0 left-1/4 right-0 p-3 text-white text-center font-semibold rounded-b-lg shadow-xl transition-all duration-300">
+                        </div>
+
+                    <div id="debug-panel-container" class="debug-container hidden bg-yellow-100 p-2 border border-yellow-300 rounded-lg">
+                        <p class="text-xs font-semibold text-yellow-800 mb-1">Base64 Strings Sent to Backend (Hover for Full String)</p>
+                        <div class="space-y-1">
+                            <input type="text" id="debug-input-base64" readOnly placeholder="Input Base64 string will appear here in Debug Mode." class="w-full p-1 border border-yellow-400 rounded-md text-xs font-mono bg-white overflow-x-scroll" />
+                            <input type="text" id="debug-reference-base64" readOnly placeholder="Reference Base64 string will appear here in Debug Mode." class="w-full p-1 border border-yellow-400 rounded-md text-xs font-mono bg-white overflow-x-scroll" />
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 h-1/2">
+       
+                        <div class="flex flex-col items-center justify-center border border-gray-400 bg-gray-100 rounded-lg p-1 shadow-inner">
+                            <p class="text-xs font-semibold text-gray-700 mb-1">Input Image</p>
+            
+                            <div id="input-image-box" class="flex-grow w-full h-full flex items-center justify-center overflow-hidden">
+                                </div>
+          
+                        </div>
+                        
+                        <div class="flex flex-col items-center justify-center border border-gray-400 bg-gray-100 rounded-lg p-1 
+shadow-inner">
+                            <p class="text-xs font-semibold text-gray-700 mb-1">Reference Image</p>
+                            <div id="reference-image-box" class="flex-grow w-full h-full flex items-center justify-center overflow-hidden">
+                               
+                                </div>
+                        </div>
+
+                        <div class="flex flex-col items-center justify-center border border-gray-400 bg-gray-100 rounded-lg p-1 shadow-inner">
+                            <p class="text-xs font-semibold text-gray-700 mb-1">Gray Conversion</p>
+                            <div id="gray-conversion-display" class="flex-grow w-full h-full flex items-center justify-center overflow-hidden">
+          
+                                </div>
+                        </div>
+                    
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 h-1/2">
+                        
+                        
+                        <div class="col-span-1 md:col-span-1 flex flex-col items-center justify-center border border-gray-400 bg-gray-100 rounded-lg p-1 shadow-inner">
+                            <p class="text-xs font-semibold text-gray-700 mb-1">Filtered Image</p>
+                            
+                            <div id="filtered-image-display" class="flex-grow w-full h-full flex items-center justify-center overflow-hidden">
+                                </div>
+                        </div>
+
+  
+                        <div class="col-span-1 md:col-span-2 flex flex-col space-y-2">
+                            <div class="flex flex-col h-1/2">
+                                <p class="text-sm font-semibold text-gray-800 mb-1">Recognised Result</p>
+                                <div id="recognition-result-display" class="flex-grow flex items-center justify-center p-3 border-4 rounded-lg bg-white shadow-md text-center 
+font-extrabold text-lg transition-colors duration-300">
+                                    Click Recognition
+                                </div>
+                            
+                            </div>
+                            
+                            <div class="flex flex-col h-1/2">
+           
+                                <p class="text-sm font-semibold text-gray-800 mb-2">ROI of Input Parameters</p>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <div 
+class="flex flex-col">
+                                        <p class="text-xs text-gray-700 mb-1">Entropy</p>
+                                        <input type="text" id="entropy-input" readOnly placeholder="N/A" class="w-full p-2 border border-gray-300 rounded-md text-sm text-center font-mono bg-white shadow-inner" />
+ 
+                                    </div>
+                                    <div class="flex flex-col">
+                           
+                                        <p class="text-xs text-gray-700 mb-1">Mean</p>
+                                        <input type="text" id="mean-input" readOnly placeholder="N/A" class="w-full p-2 border border-gray-300 rounded-md text-sm text-center font-mono bg-white shadow-inner" />
+                             
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+         
+                        <div class="col-span-1 md:col-span-1 flex flex-col items-center justify-center border border-gray-400 bg-gray-100 rounded-lg p-1 shadow-inner">
+                            <p class="text-xs font-semibold text-gray-700 mb-1">ROI of Input Image</p>
+           
+                            <div id="roi-input-display" class="flex-grow w-full h-full flex items-center justify-center overflow-hidden">
+                                </div>
+         
+                        </div>
+                        <div class="col-span-1 md:col-span-1 flex flex-col items-center justify-center border border-gray-400 bg-gray-100 rounded-lg p-1 shadow-inner">
+                            <p class="text-xs font-semibold text-gray-700 mb-1">ROI of Reference Image</p>
+              
+                            <div id="roi-reference-display" class="flex-grow w-full h-full flex items-center justify-center overflow-hidden">
+                                </div>
+            
+                        </div>
+                    </div>
+                </div>
+            `;
+            addMainAppEventListeners();
+            updateResultsDisplay(); // Initial display update
+            fetchReferenceSignature(state.userId);
+            // Load reference signature on login
+        };
+        /**
+         * Renders the login screen.
+         */
+        const renderLoginScreen = () => {
+            const app = document.getElementById('app');
+            app.innerHTML = `
+                <div class="flex items-center justify-center min-h-screen w-full bg-gray-100">
+                    <div class="p-8 bg-white shadow-2xl rounded-xl w-96">
+                        <h2 class="text-3xl font-bold mb-6 text-center text-indigo-600">Signature Recognition System</h2>
+                   
+      
+                        <div id="login-error-message" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4" role="alert">
+                            <p class="font-bold">Login Failed</p>
+  
+                            <p class="text-sm">Password is required to sign in.</p>
+                        </div>
+                        
+                    
+                        <form id="login-form">
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="username">
+                            
+                                    Username
+                                </label>
+                                <input
+                            
+                                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    id="username"
+                                    type="text"
+         
+                                    placeholder="Enter Username"
+                                    value="user@example.com"
+                                    
+                                required
+                                />
+                            </div>
+                            <div class="mb-6">
+           
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="password">
+                                    Password
+                                </label>
+     
+                                <input
+                                    class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                         
+                                    id="password"
+                                    type="password"
+                                    placeholder="********"
+                 
+                                    value="password123"
+                                    required
+                                />
+             
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <button
+                      
+                                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-150"
+                                    type="submit"
+                                >
+      
+                                    Sign In
+                                </button>
+                            </div>
+         
+                        </form>
+                        <p class="mt-4 text-xs text-gray-500 text-center">
+                            A unique User ID will be generated upon successful sign-in.
+                        </p>
+                    </div>
+                </div>
+            `;
+            document.getElementById('login-form').addEventListener('submit', handleLogin);
+        };
+
+        /**
+         * Main function to route between login and app screens.
+         */
+        const renderApp = () => {
+            if (state.isAuthReady) {
+                if (state.isLoggedIn) {
+                    renderMainApp();
+                } else {
+                    renderLoginScreen();
+                }
+            } else {
+                 document.getElementById('app').innerHTML = `<div class="flex items-center justify-center min-h-screen w-full bg-gray-100"><p class="text-gray-700">Initializing application...</p></div>`;
+            }
+        };
+
+
+        // --- HANDLERS ---
+
+        /**
+         * Handles login attempt (Simulated Auth).
+         */
+        const handleLogin = (e) => {
+            e.preventDefault();
+            const passwordInput = document.getElementById('password');
+            const password = passwordInput.value.trim();
+            const errorMessageDiv = document.getElementById('login-error-message');
+            // Basic check for password (Simulated validation)
+            if (password === '') {
+                errorMessageDiv.classList.remove('hidden');
+                setTimeout(() => errorMessageDiv.classList.add('hidden'), 3000);
+                return;
+            }
+
+            // Simulate successful login: set a persistent, unique user ID for this session
+            state.userId = state.userId ||
+            crypto.randomUUID(); 
+            state.isLoggedIn = true;
+            renderApp();
+        };
+
+        /**
+         * Handles the selection of an input file.
+         */
+        const handleFileInput = async (e, fileType) => {
+            const file = e.target.files[0];
+            if (file) {
+                const fileURL = URL.createObjectURL(file);
+                if (fileType === 'input') {
+                    state.inputImageFile = file;
+                    state.inputImageB64String = null; 
+                    updateImageDisplay('input-image-box', fileURL, file.name);
+
+                    // Pre-generate B64 for debug display
+                    if (state.isDebuggingMode) {
+                         state.inputImageB64String = await fileToBase64(file);
+                    }
+                } else if (fileType === 'reference') {
+                    state.referenceImageFile = file;
+                    state.referenceImageB64 = null;
+                    state.referenceImageB64String = null; // NEW: Clear DB B64 on file select
+                    updateImageDisplay('reference-image-box', fileURL, file.name);
+
+                    // Pre-generate B64 for debug display
+                    if (state.isDebuggingMode) {
+                         state.referenceImageB64String = await fileToBase64(file);
+                    }
+                }
+                e.target.value = null;
+                updateResultsDisplay(); 
+            }
+        };
+
+        // Handler for the debug button
+        const handleToggleDebug = async () => {
+            state.isDebuggingMode = !state.isDebuggingMode;
+            
+            // If turning ON, ensure B64 strings are generated for files if they exist
+            if (state.isDebuggingMode) {
+                 if (state.inputImageFile && !state.inputImageB64String) {
+                    state.inputImageB64String = await fileToBase64(state.inputImageFile);
+                }
+                // If reference is from a file
+                if (state.referenceImageFile && !state.referenceImageB64String) {
+                    state.referenceImageB64String = await fileToBase64(state.referenceImageFile);
+                } 
+                // If reference is from DB, it's already in state.referenceImageB64
+                if (!state.referenceImageFile && state.referenceImageB64 && !state.referenceImageB64String) {
+                     state.referenceImageB64String = state.referenceImageB64;
+                }
+            } else {
+                // If turning OFF, clear the strings to conserve memory
+                // We keep the file and DB data, just clear the generated B64 strings
+                state.inputImageB64String = null;
+                state.referenceImageB64String = null;
+            }
+            updateResultsDisplay(); 
+        };
+        /**
+         * Executes the signature recognition process.
+         */
+        const handleRecognition = async () => {
+            // Determine the reference image source: file takes precedence over DB
+            const referenceB64 = state.referenceImageFile ?
+            await fileToBase64(state.referenceImageFile) : state.referenceImageB64;
+            
+            if (!state.inputImageFile || !referenceB64) {
+                showMessage("Please select an Input Image and ensure a Reference Image is loaded/selected.", 'error');
+                return;
+            }
+
+            state.recognitionLoading = true;
+            document.getElementById('btn-recognition').disabled = true;
+            updateResultsDisplay();
+            // Show 'Analyzing...'
+            showMessage("Sending data to Python backend for analysis...", 'info');
+            try {
+                // 1. Convert input file to Base64
+                const inputB64 = await fileToBase64(state.inputImageFile);
+                // 2. Store both B64 strings in state (input is needed here; ref is either file or DB)
+                state.inputImageB64String = inputB64; 
+                state.referenceImageB64String = referenceB64;
+                
+                // 3. Call the REAL backend API for recognition
+                const apiResults = await callRecognitionAPI(inputB64, referenceB64, state.userId);
+                // 4. Update the UI with results
+                state.results = apiResults;
+                console.log("Recognition results:", apiResults);
+                showMessage(`Recognition complete: ${apiResults.recognitionResult}`, apiResults.recognitionResult.includes('ACCEPTED') ? 'success' : 'error');
+            } catch (error) {
+                console.error('Recognition process failed:', error);
+                state.results.recognitionResult = 'ERROR: API Connection Failed';
+                showMessage(`Recognition failed. Is the Python server running at ${API_BASE_URL}? Error: ${error.message}`, 'error');
+            } finally {
+                state.recognitionLoading = false;
+                document.getElementById('btn-recognition').disabled = false;
+                updateResultsDisplay(); 
+            }
+        };
+        /**
+         * Clears all inputs and results.
+         */
+        const handleClearAll = () => {
+            state.inputImageFile = null;
+            state.referenceImageFile = null;
+            state.inputImageB64String = null; 
+            state.referenceImageB64String = null; // NEW: Clear reference debug string
+            // Note: state.referenceImageB64 (API loaded image) is kept loaded
+            state.results = {
+                recognitionResult: '',
+                entropy: '',
+                mean: '',
+                grayConversionB64: null,
+                filteredImageB64: null,
+                roiInputB64: null,
+                roiRefB64: null,
+            };
+            document.getElementById('btn-recognition').disabled = false;
+            
+            // Re-render to clear display elements
+            renderApp();
+        };
+
+        /**
+         * Returns to the login screen and clears the user state.
+         */
+        const handleExit = () => {
+            state.isLoggedIn = false;
+            state.userId = null; // Clear userId on exit
+            state.referenceImageB64 = null;
+            // Clear API reference on logout
+            handleClearAll();
+        };
+        /**
+         * Adds all necessary event listeners after the main app is rendered.
+         */
+        const addMainAppEventListeners = () => {
+            // File input button listeners
+            document.getElementById('btn-input-sign').addEventListener('click', () => {
+                document.getElementById('input-file-upload').click();
+            });
+            document.getElementById('btn-select-reference').addEventListener('click', () => {
+                document.getElementById('reference-file-upload').click();
+            });
+            document.getElementById('btn-save-reference').addEventListener('click', saveReferenceSignature); 
+
+            // File input change listeners
+            document.getElementById('input-file-upload').addEventListener('change', (e) => handleFileInput(e, 'input'));
+            document.getElementById('reference-file-upload').addEventListener('change', (e) => handleFileInput(e, 'reference'));
+
+            // Action button listeners
+            document.getElementById('btn-recognition').addEventListener('click', handleRecognition);
+            document.getElementById('btn-clear-all').addEventListener('click', handleClearAll);
+            document.getElementById('btn-exit').addEventListener('click', handleExit);
+            // Debug button listener
+            document.getElementById('btn-toggle-debug').addEventListener('click', handleToggleDebug);
+        };
+
+
+        // --- INITIALIZATION ---
+
+        const initializeAuth = () => {
+            // Since we removed Firebase, we just mark auth as ready immediately
+            state.isAuthReady = true;
+            renderApp(); 
+        };
+
+        // Start the application initialization
+        document.addEventListener('DOMContentLoaded', initializeAuth);
+        // Expose handlers for debugging (optional but useful)
+        window.handleClearAll = handleClearAll;
+        window.handleRecognition = handleRecognition;
+    </script>
+</body>
+</html>
