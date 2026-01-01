@@ -60,7 +60,7 @@ Result is returned as Match / No Match
 <img width="1280" height="721" alt="image" src="https://github.com/user-attachments/assets/01d47b91-d2ab-4803-ae0a-538c19f608b1" />
 <img width="1280" height="721" alt="image" src="https://github.com/user-attachments/assets/a93adb53-5ef9-4ccb-8312-fe039bfe5404" />
 
-# Uuse case
+# Use case
 
 Bank cheque verification
 
