@@ -33,7 +33,7 @@ CNN (deep learning – optional)
 
 OS Support: Windows / Linux
 
-# Installation
+# Installation 
 git clone https://github.com/your-username/signature-recognition-system.git
 
 cd signature-recognition-system
