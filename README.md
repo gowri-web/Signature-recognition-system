@@ -3,19 +3,8 @@ The Signature Recognition System is a machine learning–based application desig
 This project demonstrates the practical application of computer vision, pattern recognition, and supervised learning techniques in a real-world security use case.
 
 # Project structure
-sig-recognition/
-├── backend/
-│   ├── app.py
-│   ├── db/
-│   └── services/
-├── frontend/
-│   └── index.html
-├── storage/
-│   └── signatures/
-├── database/
-│   ├── signature_db.sqlite
-│   └── schema.sql
-└── README.md
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/a5c4ac0b-24b6-404d-ab02-c6b97e46adf2" />
+
 
 # ER Diagram
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/b7166700-7884-436f-a71c-4761273a5f89" />
