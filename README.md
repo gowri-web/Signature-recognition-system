@@ -17,4 +17,7 @@ sig-recognition/
 │   └── schema.sql
 └── README.md
 
+# ER Diagram
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/b7166700-7884-436f-a71c-4761273a5f89" />
+
 
