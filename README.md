@@ -11,7 +11,11 @@ This project demonstrates the practical application of computer vision, pattern 
 
 # Technology Stack
 
+Frontend: HTML,CSS,JavaScript
+
 Backend: Python
+
+Database: SQLite
 
 Frontend: HTML,CSS,JavaScript
 
