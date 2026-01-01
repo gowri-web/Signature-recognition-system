@@ -2,7 +2,7 @@
 The Signature Recognition System is a machine learning–based application designed to automatically identify and verify handwritten signatures. The system analyzes signature images and determines whether a given signature is genuine or forged, enabling secure authentication for documents, banking workflows, and identity verification systems.
 This project demonstrates the practical application of computer vision, pattern recognition, and supervised learning techniques in a real-world security use case.
 
-# Project structure
+# Project Structure
 <img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/a5c4ac0b-24b6-404d-ab02-c6b97e46adf2" />
 
 
@@ -60,7 +60,7 @@ Result is returned as Match / No Match
 <img width="1280" height="721" alt="image" src="https://github.com/user-attachments/assets/01d47b91-d2ab-4803-ae0a-538c19f608b1" />
 <img width="1280" height="721" alt="image" src="https://github.com/user-attachments/assets/a93adb53-5ef9-4ccb-8312-fe039bfe5404" />
 
-# Use case
+# Use Case
 
 Bank cheque verification
 
